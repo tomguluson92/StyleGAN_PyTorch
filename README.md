@@ -22,6 +22,7 @@ therefore, i wanna implement it on pytorch1.0.1 to extend its usage in pytorch c
 
 ## Related
 [1. StyleGAN - Official TensorFlow Implementation](https://github.com/NVlabs/stylegan)
+
 [2. The re-implementation of style-based generator idea](https://github.com/SunnerLi/StyleGAN_demo)
 
 ## System Requirements
