@@ -4,7 +4,7 @@
 ![Github](https://img.shields.io/badge/python-3.6%20%7C%203.7-green.svg?style=for-the-badge&logo=python)
 ![GitHub](https://img.shields.io/github/license/neuralnotworklab/stylegan.svg?style=for-the-badge)
 ![Github](https://img.shields.io/badge/status-WorkInProgress-blue.svg?style=for-the-badge&logo=fire)
-
+![Github](https://img.shields.io/badge/Torchvision_sunner-18.9.15-yellow.svg?style=for-the-badge&logo=fire)
 
 This repository contains a PyTorch implementation of the following paper:
 > **A Style-Based Generator Architecture for Generative Adversarial Networks**<br>
