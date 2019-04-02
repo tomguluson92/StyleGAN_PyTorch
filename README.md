@@ -52,8 +52,12 @@ class TrainOptions():
 - PyTorch 1.0.1
 - Numpy 1.13.3
 - torchvision 0.2.1
+- GTX 1080Ti or above
 
 ## Q&A
 
 ## Acknowledgements
+Our code can run `1024 x 1024` resolution image generation task in 1080Ti, if you have stronger graphic card or GPU, then
+you may train your model with large batchsize and self-define your multi-gpu version of this code.
+
 My Email is **samuel.gao023@gmail.com**, if you have any question and wanna to PR, please let me know, thank you. 
