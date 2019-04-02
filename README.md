@@ -1,8 +1,8 @@
 # A PyTorch Implementation of StyleGAN
 
-![Github](https://img.shields.io/badge/PyTorch-v1.0.1-green.svg?style=for-the-badge&logo=data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAMAAABEpIrGAAABWVBMVEUAAAD/AACAgID/VVX/QECZZpn/ZjP/SSTjVTnmTTPqVSvrTjvtWzfuVTPzVTHzXS6eU57xWjChUaHtWS/uVzScU6HvWDTwWDHxVzDxVTTuVTOeUZ7vVTHwVjHwWTTwVzPxWTLxVzHxWDPyVzLuVjLvWDGdUqHvWDLwVzPwVjLwWDLxVzHxWDPxVzLvVzGeU57vVjPvWDLwWDLxVzOeUZ7xVzOfUp/xVjLvWDLwVzLwVzLxVzLxVzLvVjHvVzOeUqDwVzLwVzHwVzPwWDLwVzLxVzLvVzLvWDLwVzHwVzLwVzLwWDLwVjPwVjLxVzPwVzLwVjHwWDLxVzLvVzLwVzLwWDLwVzLwVzLwVzLwVzLvVzLwVzKeUp/wVzLwVzLwVzLvVjLwVzHwVzLwVzLwVzLwVzLwVzLwVzLwVzLwVzLwVzLwVzKeUp/wVzKeUp/wVzLwVzKeUp/wVzJC/9NHAAAAcXRSTlMAAQIDBAUFBwkKDA0ODxUWIiUmKywxMTQ1Njw/P0RFRkhJS0xNTlFRVVZXWFpbXl9fYGZqcX5/f4CEiY+QkZKTmZucnZ6foqOlp6ipq66wtrrAwsXLzM3O0tPV2Nzd3+Tm6O/w8vT19vf4+vv8/P39/ginV/UAAAE/SURBVHgBfc1XUyJREMXxMwsLLLtsVjEHzGLOikFERcSMQRQFFREUgf7+D3ZdnMKewO9l6t/3VA3M+tdQ15ebt7+w0dYMoKFSmYM1LZlyAr9fKzOw1kUUANA6/hXWtonWUYf7gSitwV4fMT/sRYktwJbnkdgFmK8JFgZI+QdgM98CsxgpEaCjTLduGH3LklKaGs7wZxpGQySkPTCIkzQByftE0hGkEaoqlamq8B3CvnoNNzqc/p3qJiDefzzzqTgIZVIt5s1/WNQrRGxPDDb4kvfp9avIeSIGp/JyznkpBkm+xGt5yJkQgwRfjmt5xnkgBlt8yXn1+lnkXBGDHmKzei0TaxcD1x2fCgEooyWOtANCL7GX0B/gf7hMLAiDVVKyOVJiMNKW6JNdF8w6r+lDZkyDFVd35Oo+l4oG3ah5B1uZgMvG1s8xAAAAAElFTkSuQmCC)
-![Github](https://img.shields.io/badge/python-3.6%20%7C%203.7-green.svg?style=for-the-badge&logo=python)
-![GitHub](https://img.shields.io/github/license/neuralnotworklab/stylegan.svg?style=for-the-badge)
+![Github](https://img.shields.io/badge/PyTorch-v1.0.1-green.svg?style=for-the-badge&logo=data:image/png)
+![Github](https://img.shields.io/badge/python-3.6-green.svg?style=for-the-badge&logo=python)
+![GitHub](https://img.shields.io/apm/l/:packageName.svg?style=for-the-badge)
 ![Github](https://img.shields.io/badge/status-WorkInProgress-blue.svg?style=for-the-badge&logo=fire)
 ![Github](https://img.shields.io/badge/Torchvision_sunner-18.9.15-yellow.svg?style=for-the-badge&logo=fire)
 
