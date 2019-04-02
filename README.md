@@ -1,4 +1,4 @@
-# A PyTorch Implementation of StyleGAN
+# A PyTorch Implementation of StyleGAN (Unofficial)
 
 ![Github](https://img.shields.io/badge/PyTorch-v1.0.1-green.svg?style=for-the-badge&logo=data:image/png)
 ![Github](https://img.shields.io/badge/python-3.6-green.svg?style=for-the-badge&logo=python)
