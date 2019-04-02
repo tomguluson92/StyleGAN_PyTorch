@@ -25,7 +25,7 @@ def presentParameters(args_dict):
 class TrainOptions():
     def __init__(self):
         parser = argparse.ArgumentParser()
-        parser.add_argument('--path', type=str, default='/home/samuel/gaodaiheng/生成模型/select_gyx/')
+        parser.add_argument('--path', type=str, default='./dogs/')
         parser.add_argument('--epoch', type=int, default=500)
         parser.add_argument('--batch_size', type=int, default=2)
         parser.add_argument('--type', type=str, default='style')
