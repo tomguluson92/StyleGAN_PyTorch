@@ -29,7 +29,7 @@ python3 train_styleGAN.py
 
 ## Unfinished
 
-* ① `blur2d` mechanism still have bug.
+* ① `blur2d` mechanism still not available.
 
 ## Related
 [1. StyleGAN - Official TensorFlow Implementation](https://github.com/NVlabs/stylegan)
