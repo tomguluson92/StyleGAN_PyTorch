@@ -16,6 +16,11 @@ This repository contains a PyTorch implementation of the following paper:
 To the best of my knowledge, there is still not a similar pytorch 1.0 implementation of styleGAN as NvLabs released(Tensorflow),
 therefore, i wanna implement it on pytorch1.0.1 to extend its usage in pytorch community.
 
+## Author
+
+- [Samuel Ko](https://blog.csdn.net/g11d111)
+- [Sunner Li](https://github.com/SunnerLi)
+
 ## Training
 
 ``` python
