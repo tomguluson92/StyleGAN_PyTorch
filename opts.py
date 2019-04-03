@@ -6,6 +6,7 @@ import argparse
 import torch
 import os
 
+
 def INFO(inputs):
     print("[ Style GAN ] %s" % (inputs))
 
@@ -31,6 +32,8 @@ class TrainOptions():
         parser.add_argument('--type', type=str, default='style')
         parser.add_argument('--resume', type=str, default='model.pth')
         parser.add_argument('--det', type=str, default='train_result_v0.1')
+        parser.add_argument('--r1_gamma', type=float, default=10.0)
+        parser.add_argument('--r2_gamma', type=float, default=0.0)
         self.opts = parser.parse_args()
 
     def parse(self):

@@ -120,7 +120,9 @@ class G_mapping(nn.Module):
     def __init__(self,
                  mapping_fmaps=512,
                  dlatent_size=512,
-                 resolution=1024):
+                 resolution=1024,
+                 normalize_latents=True  # Normalize latent vectors (Z) before feeding them to the mapping layers?
+                 ):
         super(G_mapping, self).__init__()
         self.mapping_fmaps = mapping_fmaps
         self.func = nn.Sequential(
@@ -134,12 +136,16 @@ class G_mapping(nn.Module):
             FC(dlatent_size, dlatent_size)
         )
 
+        self.normalize_latents = normalize_latents
         self.resolution_log2 = int(np.log2(resolution))
         self.num_layers = self.resolution_log2 * 2 - 2
+        self.pixel_norm = PixelNorm()
         # - 2 means we start from feature map with height and width equals 4.
         # as this example, we get num_layers = 18.
 
     def forward(self, x):
+        if self.normalize_latents:
+            x = self.pixel_norm(x)
         out = self.func(x)
         return out, self.num_layers
 
