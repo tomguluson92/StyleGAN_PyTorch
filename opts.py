@@ -26,12 +26,12 @@ def presentParameters(args_dict):
 class TrainOptions():
     def __init__(self):
         parser = argparse.ArgumentParser()
-        parser.add_argument('--path', type=str, default='./dogs/')
+        parser.add_argument('--path', type=str, default='./star/')
         parser.add_argument('--epoch', type=int, default=500)
         parser.add_argument('--batch_size', type=int, default=2)
         parser.add_argument('--type', type=str, default='style')
         parser.add_argument('--resume', type=str, default='model.pth')
-        parser.add_argument('--det', type=str, default='train_result_v0.1')
+        parser.add_argument('--det', type=str, default='train_result')
         parser.add_argument('--r1_gamma', type=float, default=10.0)
         parser.add_argument('--r2_gamma', type=float, default=0.0)
         self.opts = parser.parse_args()
