@@ -9,9 +9,9 @@ import torchvision.transforms as transforms
 
 from networks_stylegan import StyleGenerator, StyleDiscriminator
 from networks_gan import Generator, Discriminator
-from utils import plotLossCurve
-from loss import gradient_penalty, R1Penalty, R2Penalty
-from opts import TrainOptions
+from utils.utils import plotLossCurve
+from loss.loss import gradient_penalty, R1Penalty, R2Penalty
+from opts.opts import TrainOptions
 
 from torchvision.utils import save_image
 from tqdm import tqdm
