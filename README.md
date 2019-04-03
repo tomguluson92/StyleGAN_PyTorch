@@ -17,6 +17,7 @@ To the best of my knowledge, there is still not a similar pytorch 1.0 implementa
 therefore, i wanna implement it on pytorch1.0.1 to extend its usage in pytorch community.
 
 ## Training
+
 ``` python
 # ① pass your own dataset of training, batchsize and common settings in TrainOpts of `opts.py`.
 
@@ -27,6 +28,7 @@ python3 train_styleGAN.py
 ```
 
 ## Unfinished
+
 * ① `blur2d` mechanism still have bug.
 
 ## Related
