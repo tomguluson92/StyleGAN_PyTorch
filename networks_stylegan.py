@@ -24,7 +24,13 @@ class ApplyNoise(nn.Module):
 
 
 class FC(nn.Module):
-    def __init__(self, in_channels, out_channels, gain=2**(0.5), use_wscale=False, lrmul=1, bias=True):
+    def __init__(self,
+                 in_channels,
+                 out_channels,
+                 gain=2**(0.5),
+                 use_wscale=False,
+                 lrmul=1,
+                 bias=True):
         """
             The complete conversion of Dense/FC/Linear Layer of original Tensorflow version.
         """
@@ -36,6 +42,7 @@ class FC(nn.Module):
         else:
             init_std = he_std / lrmul
             self.w_lrmul = lrmul
+
         self.weight = torch.nn.Parameter(torch.randn(out_channels, in_channels) * init_std)
         if bias:
             self.bias = torch.nn.Parameter(torch.zeros(out_channels))
@@ -88,6 +95,41 @@ class Blur2d(nn.Module):
             return x
         else:
             return x
+
+
+class Conv2d(nn.Module):
+    def __init__(self,
+                 input_channels,
+                 output_channels,
+                 kernel_size,
+                 gain=2 ** (0.5),
+                 use_wscale=False,
+                 lrmul=1,
+                 bias=True):
+        super().__init__()
+        he_std = gain * (input_channels * kernel_size ** 2) ** (-0.5)  # He init
+        self.kernel_size = kernel_size
+        if use_wscale:
+            init_std = 1.0 / lrmul
+            self.w_lrmul = he_std * lrmul
+        else:
+            init_std = he_std / lrmul
+            self.w_lrmul = lrmul
+
+        self.weight = torch.nn.Parameter(
+            torch.randn(output_channels, input_channels, kernel_size, kernel_size) * init_std)
+        if bias:
+            self.bias = torch.nn.Parameter(torch.zeros(output_channels))
+            self.b_lrmul = lrmul
+        else:
+            self.bias = None
+
+    def forward(self, x):
+        if self.bias is not None:
+            return F.conv2d(x, self.weight * self.w_lrmul, self.bias * self.b_lrmul, padding=self.kernel_size // 2)
+        else:
+            return F.conv2d(x, self.weight * self.w_lrmul, padding=self.kernel_size // 2)
+
 
 class PixelNorm(nn.Module):
     def __init__(self, epsilon=1e-8):
@@ -190,10 +232,10 @@ class G_synthesis(nn.Module):
         """
             2019.3.31
         :param dlatent_size: 512 Disentangled latent(W) dimensionality.
-        :param resolution: 1024 输出图像的分辨率。
+        :param resolution: 1024 x 1024.
         :param fmap_base:
         :param num_channels:
-        :param structure: 先实现最基础的fixed模式.
+        :param structure: only support 'fixed' mode.
         :param fmap_max:
         :param bs: batch size.
         """
@@ -210,7 +252,6 @@ class G_synthesis(nn.Module):
         self.use_instance_norm = use_instance_norm
         self.pixel_norm = PixelNorm()
         self.instance_norm = InstanceNorm()
-
 
         # Noise inputs.
         self.noise_inputs = []
@@ -232,7 +273,6 @@ class G_synthesis(nn.Module):
         # torgb: fixed mode
         self.torgb = nn.Conv2d(self.nf(self.resolution_log2), num_channels, kernel_size=1)
 
-
         self.const_input = nn.Parameter(torch.ones(bs, self.nf(1), 4, 4))
         self.style21  = nn.Linear(dlatent_size, self.nf(1)*2)
         self.style22  = nn.Linear(dlatent_size, self.nf(1)*2)
@@ -245,7 +285,6 @@ class G_synthesis(nn.Module):
         self.style9   = nn.Linear(dlatent_size, self.nf(8)*2)
         self.style10  = nn.Linear(dlatent_size, self.nf(9)*2)
 
-
         self.up_conv = nn.Upsample(scale_factor=2, mode='nearest')
         self.transpose_conv_64_128    = nn.ConvTranspose2d(self.nf(5), self.nf(5), 4, stride=2, padding=1)
         self.transpose_conv_128_256   = nn.ConvTranspose2d(self.nf(6), self.nf(6), 4, stride=2, padding=1)
@@ -254,33 +293,33 @@ class G_synthesis(nn.Module):
 
         # for kernel_size = 3,
         # torch padding=(1, 1) == tensorflow padding='SAME'.
-        self.conv2 = nn.Conv2d(in_channels=self.nf(1), out_channels=self.nf(1), kernel_size=3, padding=(1, 1))
+        self.conv2 = Conv2d(input_channels=self.nf(1), output_channels=self.nf(1), kernel_size=3)
 
-        self.conv31 = nn.Conv2d(in_channels=self.nf(1), out_channels=self.nf(2), kernel_size=3, padding=(1, 1))
-        self.conv32 = nn.Conv2d(in_channels=self.nf(2), out_channels=self.nf(2), kernel_size=3, padding=(1, 1))
+        self.conv31 = Conv2d(input_channels=self.nf(1), output_channels=self.nf(2), kernel_size=3)
+        self.conv32 = Conv2d(input_channels=self.nf(2), output_channels=self.nf(2), kernel_size=3)
 
-        self.conv41 = nn.Conv2d(in_channels=self.nf(2), out_channels=self.nf(3), kernel_size=3, padding=(1, 1))
-        self.conv42 = nn.Conv2d(in_channels=self.nf(3), out_channels=self.nf(3), kernel_size=3, padding=(1, 1))
+        self.conv41 = Conv2d(input_channels=self.nf(2), output_channels=self.nf(3), kernel_size=3)
+        self.conv42 = Conv2d(input_channels=self.nf(3), output_channels=self.nf(3), kernel_size=3)
 
-        self.conv51 = nn.Conv2d(in_channels=self.nf(3), out_channels=self.nf(4), kernel_size=3, padding=(1, 1))
-        self.conv52 = nn.Conv2d(in_channels=self.nf(4), out_channels=self.nf(4), kernel_size=3, padding=(1, 1))
+        self.conv51 = Conv2d(input_channels=self.nf(3), output_channels=self.nf(4), kernel_size=3)
+        self.conv52 = Conv2d(input_channels=self.nf(4), output_channels=self.nf(4), kernel_size=3)
 
-        self.conv61 = nn.Conv2d(in_channels=self.nf(4), out_channels=self.nf(5), kernel_size=3, padding=(1, 1))
-        self.conv62 = nn.Conv2d(in_channels=self.nf(5), out_channels=self.nf(5), kernel_size=3, padding=(1, 1))
+        self.conv61 = Conv2d(input_channels=self.nf(4), output_channels=self.nf(5), kernel_size=3)
+        self.conv62 = Conv2d(input_channels=self.nf(5), output_channels=self.nf(5), kernel_size=3)
 
-        self.conv71 = nn.Conv2d(in_channels=self.nf(5), out_channels=self.nf(6), kernel_size=3, padding=(1, 1))
-        self.conv72 = nn.Conv2d(in_channels=self.nf(6), out_channels=self.nf(6), kernel_size=3, padding=(1, 1))
+        self.conv71 = Conv2d(input_channels=self.nf(5), output_channels=self.nf(6), kernel_size=3)
+        self.conv72 = Conv2d(input_channels=self.nf(6), output_channels=self.nf(6), kernel_size=3)
 
-        self.conv81 = nn.Conv2d(in_channels=self.nf(6), out_channels=self.nf(7), kernel_size=3, padding=(1, 1))
-        self.conv82 = nn.Conv2d(in_channels=self.nf(7), out_channels=self.nf(7), kernel_size=3, padding=(1, 1))
+        self.conv81 = Conv2d(input_channels=self.nf(6), output_channels=self.nf(7), kernel_size=3)
+        self.conv82 = Conv2d(input_channels=self.nf(7), output_channels=self.nf(7), kernel_size=3)
 
-        self.conv91 = nn.Conv2d(in_channels=self.nf(7), out_channels=self.nf(8), kernel_size=3, padding=(1, 1))
-        self.conv92 = nn.Conv2d(in_channels=self.nf(8), out_channels=self.nf(8), kernel_size=3, padding=(1, 1))
+        self.conv91 = Conv2d(input_channels=self.nf(7), output_channels=self.nf(8), kernel_size=3)
+        self.conv92 = Conv2d(input_channels=self.nf(8), output_channels=self.nf(8), kernel_size=3)
 
-        self.conv101 = nn.Conv2d(in_channels=self.nf(8), out_channels=self.nf(9), kernel_size=3, padding=(1, 1))
-        self.conv102 = nn.Conv2d(in_channels=self.nf(9), out_channels=self.nf(9), kernel_size=3, padding=(1, 1))
+        self.conv101 = Conv2d(input_channels=self.nf(8), output_channels=self.nf(9), kernel_size=3)
+        self.conv102 = Conv2d(input_channels=self.nf(9), output_channels=self.nf(9), kernel_size=3)
 
-        self.conv111 = nn.Conv2d(in_channels=self.nf(9), out_channels=self.nf(10), kernel_size=3, padding=(1, 1))
+        self.conv111 = Conv2d(input_channels=self.nf(9), output_channels=self.nf(10), kernel_size=3)
 
     def forward(self, dlatent):
         """
