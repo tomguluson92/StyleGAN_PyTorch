@@ -34,35 +34,35 @@ class FC(nn.Module):
 
 
 class Blur2d(nn.Module):
-    def __init__(self, f=[1,2,1], normalize=True, flip=False):
+    def __init__(self, f=[1,2,1], normalize=True, flip=False, stride=1):
         """
             depthwise_conv2d:
             https://blog.csdn.net/mao_xiao_feng/article/details/78003476
         """
         super(Blur2d, self).__init__()
-        # Finalize filter kernel.
-        f = np.array(f, dtype=np.float32)
-        if f.ndim == 1:
-            f = f[:, np.newaxis] * f[np.newaxis, :]
-        assert f.ndim == 2
+
+        f = [1, 2, 1]
+        f = torch.tensor(f, dtype=torch.float32)
+        f = f[:, None] * f[None, :]
+        f = f[None, None]
         if normalize:
-            f /= np.sum(f)
+            f = f / f.sum()
         if flip:
-            f = f[::-1, ::-1]
-        self.f = f[np.newaxis, np.newaxis, :, :]
+            f = f[:, :, ::-1, ::-1]
+        self.f = f
+        self.stride = stride
 
     def forward(self, x):
-        # fixme: still not have the right fmaps.
+        # expand kernel channels
+        kernel = self.f.expand(x.size(1), -1, -1, -1).to(x.device)
+        x = F.conv2d(
+            x,
+            kernel,
+            stride=self.stride,
+            padding=int((self.f.size(2)-1)/2),
+            groups=x.size(1)
+        )
         return x
-        # self.f = np.tile(self.f, [x.shape[1], 1, 1, 1])
-        # # No-op => early exit.
-        # if self.f.shape == (1, 1) and self.f[0, 0] == 1:
-        #     return x
-        #
-        # # Convolve using depthwise_conv2d.
-        # f = torch.Tensor(self.f).to("cuda")
-        # x = F.conv2d(x, f, padding=(1, 1), groups=x.shape[1])
-        # return x
 
 
 class PixelNorm(nn.Module):
@@ -545,7 +545,7 @@ class StyleGenerator(nn.Module):
         #     dlatents2 = dlatents2.unsqueeze(1)
         #     dlatents2 = dlatents2.expand(-1, int(num_layers), -1)
         #
-        #     TODO: original NvLABs produce a placeholder "lod", this mechanism was not added here.
+        #     # TODO: original NvLABs produce a placeholder "lod", this mechanism was not added here.
         #     cur_layers = num_layers
         #     mix_layers = num_layers
         #     if np.random.random() < self.style_mixing_prob:
@@ -567,6 +567,7 @@ class StyleGenerator(nn.Module):
                reduce to
                b * t
             """
+
             dlatents1 = dlatents1 * torch.Tensor(coefs).to(dlatents1.device)
 
         img = self.synthesis(dlatents1)
@@ -578,10 +579,11 @@ class StyleDiscriminator(nn.Module):
                  resolution=1024,
                  fmap_base=8192,
                  num_channels=3,
-                 structure='fixed',
+                 structure='fixed',  # 'fixed' = no progressive growing, 'linear' = human-readable, 'recursive' = efficient, only support 'fixed' mode now.
                  fmap_max=512,
                  fmap_decay=1.0,
-                 f=[1, 2, 1]):
+                 f=[1, 2, 1]         # Low-pass filter to apply when resampling activations. None = no filtering.
+                 ):
         """
             Noitce: we only support input pic with height == width.
 
