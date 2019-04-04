@@ -517,19 +517,59 @@ class G_synthesis(nn.Module):
 class StyleGenerator(nn.Module):
     def __init__(self,
                  mapping_fmaps=512,
-                 bs=16):
+                 bs=16,
+                 style_mixing_prob=0.9,       # Probability of mixing styles during training. None = disable.
+                 truncation_psi=0.7,          # Style strength multiplier for the truncation trick. None = disable.
+                 truncation_cutoff=8          # Number of layers for which to apply the truncation trick. None = disable.
+                 ):
         super(StyleGenerator, self).__init__()
-        self.mapping = G_mapping(mapping_fmaps)
-        self.synthesis = G_synthesis(mapping_fmaps, bs=bs)
+        self.mapping_fmaps = mapping_fmaps
+        self.style_mixing_prob = style_mixing_prob
+        self.truncation_psi = truncation_psi
+        self.truncation_cutoff = truncation_cutoff
 
-    def forward(self, z):
-        output, num_layers = self.mapping(z)
+        self.mapping = G_mapping(self.mapping_fmaps)
+        self.synthesis = G_synthesis(self.mapping_fmaps, bs=bs)
+
+    def forward(self, latents1):
+        dlatents1, num_layers = self.mapping(latents1)
         # let [N, O] -> [N, num_layers, O]
         # 这里的unsqueeze不能使用inplace操作, 如果这样的话, 反向传播的链条会断掉的.
-        output = output.unsqueeze(1)
-        output = output.expand(-1, int(num_layers), -1)
+        dlatents1 = dlatents1.unsqueeze(1)
+        dlatents1 = dlatents1.expand(-1, int(num_layers), -1)
 
-        img = self.synthesis(output)
+        # Add mixing style mechanism.
+        # with torch.no_grad():
+        #     latents2 = torch.randn(latents1.shape).to(latents1.device)
+        #     dlatents2, num_layers = self.mapping(latents2)
+        #     dlatents2 = dlatents2.unsqueeze(1)
+        #     dlatents2 = dlatents2.expand(-1, int(num_layers), -1)
+        #
+        #     TODO: original NvLABs produce a placeholder "lod", this mechanism was not added here.
+        #     cur_layers = num_layers
+        #     mix_layers = num_layers
+        #     if np.random.random() < self.style_mixing_prob:
+        #         mix_layers = np.random.randint(1, cur_layers)
+        #
+        #     # NvLABs: dlatents = tf.where(tf.broadcast_to(layer_idx < mixing_cutoff, tf.shape(dlatents)), dlatents, dlatents2)
+        #     for i in range(num_layers):
+        #         if i >= mix_layers:
+        #             dlatents1[:, i, :] = dlatents2[:, i, :]
+
+        # Apply truncation trick.
+        if self.truncation_psi and self.truncation_cutoff:
+            coefs = np.ones([1, num_layers, 1], dtype=np.float32)
+            for i in range(num_layers):
+                if i < self.truncation_cutoff:
+                    coefs[:, i, :] *= self.truncation_psi
+            """Linear interpolation.
+               a + (b - a) * t (a = 0)
+               reduce to
+               b * t
+            """
+            dlatents1 = dlatents1 * torch.Tensor(coefs).to(dlatents1.device)
+
+        img = self.synthesis(dlatents1)
         return img
 
 
