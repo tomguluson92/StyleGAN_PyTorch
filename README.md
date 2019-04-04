@@ -2,7 +2,7 @@
 
 ![Github](https://img.shields.io/badge/PyTorch-v1.0.1-green.svg?style=for-the-badge&logo=data:image/png)
 ![Github](https://img.shields.io/badge/python-3.6-green.svg?style=for-the-badge&logo=python)
-![Github](https://img.shields.io/badge/status-WorkInProgress-blue.svg?style=for-the-badge&logo=fire)
+![Github](https://img.shields.io/badge/status-AlmostFinished-blue.svg?style=for-the-badge&logo=fire)
 ![Github](https://img.shields.io/badge/license-CC_BY--NC-green.svg?style=for-the-badge&logo=fire)
 
 This repository contains a PyTorch implementation of the following paper:
