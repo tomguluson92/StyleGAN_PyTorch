@@ -24,12 +24,31 @@ class ApplyNoise(nn.Module):
 
 
 class FC(nn.Module):
-    def __init__(self, in_channels, out_channels):
+    def __init__(self, in_channels, out_channels, gain=2**(0.5), use_wscale=False, lrmul=1, bias=True):
+        """
+            The complete conversion of Dense/FC/Linear Layer of original Tensorflow version.
+        """
         super(FC, self).__init__()
-        self.main = nn.utils.spectral_norm(nn.Linear(in_channels, out_channels))
+        he_std = gain * in_channels ** (-0.5)  # He init
+        if use_wscale:
+            init_std = 1.0 / lrmul
+            self.w_lrmul = he_std * lrmul
+        else:
+            init_std = he_std / lrmul
+            self.w_lrmul = lrmul
+        self.weight = torch.nn.Parameter(torch.randn(out_channels, in_channels) * init_std)
+        if bias:
+            self.bias = torch.nn.Parameter(torch.zeros(out_channels))
+            self.b_lrmul = lrmul
+        else:
+            self.bias = None
 
     def forward(self, x):
-        out = F.leaky_relu(self.main(x), 0.2, inplace=True)
+        if self.bias is not None:
+            out = F.linear(x, self.weight * self.w_lrmul, self.bias * self.b_lrmul)
+        else:
+            out = F.linear(x, self.weight * self.w_lrmul)
+        out = F.leaky_relu(out, 0.2, inplace=True)
         return out
 
 
@@ -40,30 +59,35 @@ class Blur2d(nn.Module):
             https://blog.csdn.net/mao_xiao_feng/article/details/78003476
         """
         super(Blur2d, self).__init__()
+        assert isinstance(f, list) or f is None, "kernel f must be an instance of python built_in type list!"
 
-        f = [1, 2, 1]
-        f = torch.tensor(f, dtype=torch.float32)
-        f = f[:, None] * f[None, :]
-        f = f[None, None]
-        if normalize:
-            f = f / f.sum()
-        if flip:
-            f = f[:, :, ::-1, ::-1]
-        self.f = f
+        if f is not None:
+            f = torch.tensor(f, dtype=torch.float32)
+            f = f[:, None] * f[None, :]
+            f = f[None, None]
+            if normalize:
+                f = f / f.sum()
+            if flip:
+                f = f[:, :, ::-1, ::-1]
+            self.f = f
+        else:
+            self.f = None
         self.stride = stride
 
     def forward(self, x):
-        # expand kernel channels
-        kernel = self.f.expand(x.size(1), -1, -1, -1).to(x.device)
-        x = F.conv2d(
-            x,
-            kernel,
-            stride=self.stride,
-            padding=int((self.f.size(2)-1)/2),
-            groups=x.size(1)
-        )
-        return x
-
+        if self.f is not None:
+            # expand kernel channels
+            kernel = self.f.expand(x.size(1), -1, -1, -1).to(x.device)
+            x = F.conv2d(
+                x,
+                kernel,
+                stride=self.stride,
+                padding=int((self.f.size(2)-1)/2),
+                groups=x.size(1)
+            )
+            return x
+        else:
+            return x
 
 class PixelNorm(nn.Module):
     def __init__(self, epsilon=1e-8):
@@ -112,8 +136,7 @@ def weights_init(m):
 
 # =========================================================================
 #   Define sub-network
-#   2019.3.31 星期日
-#   根据它的默认情况， 都是512, 512的.
+#   2019.3.31
 #   FC
 # =========================================================================
 class G_mapping(nn.Module):
@@ -121,19 +144,21 @@ class G_mapping(nn.Module):
                  mapping_fmaps=512,
                  dlatent_size=512,
                  resolution=1024,
-                 normalize_latents=True  # Normalize latent vectors (Z) before feeding them to the mapping layers?
+                 normalize_latents=True,  # Normalize latent vectors (Z) before feeding them to the mapping layers?
+                 use_wscale=True,         # Enable equalized learning rate?
+                 gain=2**(0.5)            # original gain in tensorflow.
                  ):
         super(G_mapping, self).__init__()
         self.mapping_fmaps = mapping_fmaps
         self.func = nn.Sequential(
-            FC(self.mapping_fmaps, dlatent_size),
-            FC(dlatent_size, dlatent_size),
-            FC(dlatent_size, dlatent_size),
-            FC(dlatent_size, dlatent_size),
-            FC(dlatent_size, dlatent_size),
-            FC(dlatent_size, dlatent_size),
-            FC(dlatent_size, dlatent_size),
-            FC(dlatent_size, dlatent_size)
+            FC(self.mapping_fmaps, dlatent_size, gain, use_wscale),
+            FC(dlatent_size, dlatent_size, gain, use_wscale),
+            FC(dlatent_size, dlatent_size, gain, use_wscale),
+            FC(dlatent_size, dlatent_size, gain, use_wscale),
+            FC(dlatent_size, dlatent_size, gain, use_wscale),
+            FC(dlatent_size, dlatent_size, gain, use_wscale),
+            FC(dlatent_size, dlatent_size, gain, use_wscale),
+            FC(dlatent_size, dlatent_size, gain, use_wscale)
         )
 
         self.normalize_latents = normalize_latents
@@ -582,7 +607,7 @@ class StyleDiscriminator(nn.Module):
                  structure='fixed',  # 'fixed' = no progressive growing, 'linear' = human-readable, 'recursive' = efficient, only support 'fixed' mode now.
                  fmap_max=512,
                  fmap_decay=1.0,
-                 f=[1, 2, 1]         # Low-pass filter to apply when resampling activations. None = no filtering.
+                 f=[1, 2, 1]         # (Huge overload, if you dont have enough resouces, please pass it as `f = None`)Low-pass filter to apply when resampling activations. None = no filtering.
                  ):
         """
             Noitce: we only support input pic with height == width.
