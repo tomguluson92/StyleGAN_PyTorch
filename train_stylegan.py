@@ -20,8 +20,16 @@ from torch import nn
 import torch.optim as optim
 from torch.autograd import Variable
 import numpy as np
+import random
 import torch
 import os
+
+# Set random seem for reproducibility
+manualSeed = 999
+#manualSeed = random.randint(1, 10000) # use if you want new results
+print("Random Seed: ", manualSeed)
+random.seed(manualSeed)
+torch.manual_seed(manualSeed)
 
 # Hyper-parameters
 CRITIC_ITER = 5
@@ -47,8 +55,8 @@ def main(opts):
     D = StyleDiscriminator().to(opts.device)
 
     # Create the criterion, optimizer and scheduler
-    optim_D = optim.Adam(D.parameters(), lr=0.0001, betas=(0.5, 0.999))
-    optim_G = optim.Adam(G.parameters(), lr=0.0001, betas=(0.5, 0.999))
+    optim_D = optim.Adam(D.parameters(), lr=0.0002, betas=(0.5, 0.999))
+    optim_G = optim.Adam(G.parameters(), lr=0.0002, betas=(0.5, 0.999))
     scheduler_D = optim.lr_scheduler.ExponentialLR(optim_D, gamma=0.99)
     scheduler_G = optim.lr_scheduler.ExponentialLR(optim_G, gamma=0.99)
 
@@ -63,7 +71,7 @@ def main(opts):
         loss_G_list = []
         for i, (real_img,) in enumerate(bar):
             # =======================================================================================================
-            #   Update discriminator
+            #   (1) Update D network: maximize log(D(x)) + log(1 - D(G(z)))
             # =======================================================================================================
             # Compute adversarial loss toward discriminator
             real_img = real_img.to(opts.device)
@@ -74,11 +82,11 @@ def main(opts):
             d_loss = d_loss + softplus(-real_logit)[0]
 
             if opts.r1_gamma != 0.0:
-                r1_penalty = R1Penalty(real_img, D)
+                r1_penalty = R1Penalty(real_img.detach(), D)
                 d_loss = d_loss + r1_penalty * (opts.r1_gamma * 0.5)
 
             if opts.r2_gamma != 0.0:
-                r2_penalty = R2Penalty(fake_img, D)
+                r2_penalty = R2Penalty(fake_img.detach(), D)
                 d_loss = d_loss + r2_penalty * (opts.r2_gamma * 0.5)
 
             loss_D_list.append(d_loss.item())
@@ -89,26 +97,32 @@ def main(opts):
             optim_D.step()
 
             # =======================================================================================================
-            #   Update generator
+            #   (2) Update G network: maximize log(D(G(z)))
             # =======================================================================================================
             # if i % CRITIC_ITER == 0:
             # Compute adversarial loss toward generator
+            G.zero_grad()
             fake_logit = D(fake_img)
             g_loss = softplus(-fake_logit).mean()
             loss_G_list.append(g_loss.item())
 
             # Update generator
-            D.zero_grad()
-            optim_G.zero_grad()
             g_loss.backward()
             optim_G.step()
-            bar.set_description(" {} [G]: {} [D]: {}".format(ep, loss_G_list[-1], loss_D_list[-1]))
+
+            # Output training stats
+            bar.set_description("Epoch {} [{}, {}] [G]: {} [D]: {}".format(ep, i+1, len(loader), loss_G_list[-1], loss_D_list[-1]))
 
         # Save the result
         Loss_G_list.append(np.mean(loss_G_list))
         Loss_D_list.append(np.mean(loss_D_list))
-        fake_img = G(fix_z)
-        save_image(fake_img, os.path.join(opts.det, 'images', str(ep) + '.png'), nrow=4, normalize=True)
+
+        # Check how the generator is doing by saving G's output on fixed_noise
+        with torch.no_grad():
+            fake_img = G(fix_z).detach().cpu()
+            save_image(fake_img, os.path.join(opts.det, 'images', str(ep) + '.png'), nrow=4, normalize=True)
+
+        # Save model
         state = {
             'G': G.state_dict(),
             'D': D.state_dict(),
