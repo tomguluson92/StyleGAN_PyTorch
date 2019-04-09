@@ -1,9 +1,15 @@
 # coding: UTF-8
 """
     @author: samuel ko
-    @date:   2019.04.02
+    @date:   2019.04.09
     @notice:
-             1) we don't add blur2d mechanism in generator to avoid the generated image from blurry and noisy.
+             1) refactor the module of Gsynthesis with
+                - LayerEpilogue.
+                - Upsample2d.
+                - GBlock.
+                and etc.
+             2) the initialization of every patch we use are all abided by the original NvLabs released code.
+             3) Discriminator is a simplicity version of PyTorch.
 
 """
 import torch.nn.functional as F
@@ -11,16 +17,38 @@ import torch.nn as nn
 import numpy as np
 import torch
 import os
+from collections import OrderedDict
 from torch.nn.init import kaiming_normal_
 
 
 class ApplyNoise(nn.Module):
-    def __init__(self, bs, res, randomize_noise=True):
+    def __init__(self, channels):
         super().__init__()
-        self.weight = nn.Parameter(torch.zeros(bs, 1, res, res).to("cuda"))
+        self.weight = nn.Parameter(torch.zeros(channels))
 
     def forward(self, x, noise):
-        return x + self.weight * noise
+        if noise is None:
+            noise = torch.randn(x.size(0), 1, x.size(2), x.size(3), device=x.device, dtype=x.dtype)
+        return x + self.weight.view(1, -1, 1, 1) * noise
+
+
+class ApplyStyle(nn.Module):
+    """
+        @ref: https://github.com/lernapparat/lernapparat/blob/master/style_gan/pytorch_style_gan.ipynb
+    """
+    def __init__(self, latent_size, channels, use_wscale):
+        super(ApplyStyle, self).__init__()
+        self.linear = FC(latent_size,
+                      channels * 2,
+                      gain=1.0,
+                      use_wscale=use_wscale)
+
+    def forward(self, x, latent):
+        style = self.linear(latent)  # style => [batch_size, n_channels*2]
+        shape = [-1, 2, x.size(1), 1, 1]
+        style = style.view(shape)    # [batch_size, 2, n_channels, ...]
+        x = x * (style[:, 0] + 1.) + style[:, 1]
+        return x
 
 
 class FC(nn.Module):
@@ -29,7 +57,7 @@ class FC(nn.Module):
                  out_channels,
                  gain=2**(0.5),
                  use_wscale=False,
-                 lrmul=1,
+                 lrmul=1.0,
                  bias=True):
         """
             The complete conversion of Dense/FC/Linear Layer of original Tensorflow version.
@@ -131,6 +159,27 @@ class Conv2d(nn.Module):
             return F.conv2d(x, self.weight * self.w_lrmul, padding=self.kernel_size // 2)
 
 
+class Upscale2d(nn.Module):
+    def __init__(self, factor=2, gain=1):
+        """
+            the first upsample method in G_synthesis.
+        :param factor:
+        :param gain:
+        """
+        super().__init__()
+        self.gain = gain
+        self.factor = factor
+
+    def forward(self, x):
+        if self.gain != 1:
+            x = x * self.gain
+        if self.factor > 1:
+            shape = x.shape
+            x = x.view(shape[0], shape[1], shape[2], 1, shape[3], 1).expand(-1, -1, -1, self.factor, -1, self.factor)
+            x = x.contiguous().view(shape[0], shape[1], self.factor * shape[2], self.factor * shape[3])
+        return x
+
+
 class PixelNorm(nn.Module):
     def __init__(self, epsilon=1e-8):
         """
@@ -163,15 +212,98 @@ class InstanceNorm(nn.Module):
         return x * tmp
 
 
-###
-# 初始化策略 2019.3.31
-# styleGAN中只初始化weight, 而没管bias.
-# https://discuss.pytorch.org/t/how-are-layer-weights-and-biases-initialized-by-default/13073/2
-# kaiming_normal_ : https://pytorch.org/docs/master/nn.html?highlight=init#torch-nn-init
-###
-def weights_init(m):
-    if isinstance(m, nn.Conv2d):
-        kaiming_normal_(m.weight.data)
+class LayerEpilogue(nn.Module):
+    def __init__(self,
+                 channels,
+                 dlatent_size,
+                 use_wscale,
+                 use_noise,
+                 use_pixel_norm,
+                 use_instance_norm,
+                 use_styles):
+        super(LayerEpilogue, self).__init__()
+
+        if use_noise:
+            self.noise = ApplyNoise(channels)
+        self.act = nn.LeakyReLU(negative_slope=0.2)
+
+        if use_pixel_norm:
+            self.pixel_norm = PixelNorm()
+        else:
+            self.pixel_norm = None
+
+        if use_instance_norm:
+            self.instance_norm = InstanceNorm()
+        else:
+            self.instance_norm = None
+
+        if use_styles:
+            self.style_mod = ApplyStyle(dlatent_size, channels, use_wscale=use_wscale)
+        else:
+            self.style_mod = None
+
+    def forward(self, x, noise, dlatents_in_slice=None):
+        x = self.noise(x, noise)
+        x = self.act(x)
+        if self.pixel_norm is not None:
+            x = self.pixel_norm(x)
+        if self.instance_norm is not None:
+            x = self.instance_norm(x)
+        if self.style_mod is not None:
+            x = self.style_mod(x, dlatents_in_slice)
+
+        return x
+
+
+class GBlock(nn.Module):
+    def __init__(self,
+                 res,
+                 use_wscale,
+                 use_noise,
+                 use_pixel_norm,
+                 use_instance_norm,
+                 noise_input,        # noise
+                 dlatent_size=512,   # Disentangled latent (W) dimensionality.
+                 use_style=True,     # Enable style inputs?
+                 f=None,        # (Huge overload, if you dont have enough resouces, please pass it as `f = None`)Low-pass filter to apply when resampling activations. None = no filtering.
+                 factor=2,           # upsample factor.
+                 fmap_base=8192,     # Overall multiplier for the number of feature maps.
+                 fmap_decay=1.0,     # log2 feature map reduction when doubling the resolution.
+                 fmap_max=512,       # Maximum number of feature maps in any layer.
+                 ):
+        super(GBlock, self).__init__()
+        self.nf = lambda stage: min(int(fmap_base / (2.0 ** (stage * fmap_decay))), fmap_max)
+
+        # res
+        self.res = res
+
+        # blur2d
+        self.blur = Blur2d(f)
+
+        # noise
+        self.noise_input = noise_input
+
+        if res < 7:
+            # upsample method 1
+            self.up_sample = Upscale2d(factor)
+        else:
+            # upsample method 2
+            self.up_sample = nn.ConvTranspose2d(self.nf(res-3), self.nf(res-2), 4, stride=2, padding=1)
+
+        # A Composition of LayerEpilogue and Conv2d.
+        self.adaIn1 = LayerEpilogue(self.nf(res-2), dlatent_size, use_wscale, use_noise,
+                                    use_pixel_norm, use_instance_norm, use_style)
+        self.conv1  = Conv2d(input_channels=self.nf(res-2), output_channels=self.nf(res-2),
+                             kernel_size=3, use_wscale=use_wscale)
+        self.adaIn2 = LayerEpilogue(self.nf(res-2), dlatent_size, use_wscale, use_noise,
+                                    use_pixel_norm, use_instance_norm, use_style)
+
+    def forward(self, x, dlatent):
+        x = self.up_sample(x)
+        x = self.adaIn1(x, self.noise_input[self.res*2-4], dlatent[:, self.res*2-4])
+        x = self.conv1(x)
+        x = self.adaIn2(x, self.noise_input[self.res*2-3], dlatent[:, self.res*2-3])
+        return x
 
 #model.apply(weights_init)
 
@@ -188,19 +320,20 @@ class G_mapping(nn.Module):
                  resolution=1024,
                  normalize_latents=True,  # Normalize latent vectors (Z) before feeding them to the mapping layers?
                  use_wscale=True,         # Enable equalized learning rate?
+                 lrmul=0.01,              # Learning rate multiplier for the mapping layers.
                  gain=2**(0.5)            # original gain in tensorflow.
                  ):
         super(G_mapping, self).__init__()
         self.mapping_fmaps = mapping_fmaps
         self.func = nn.Sequential(
-            FC(self.mapping_fmaps, dlatent_size, gain, use_wscale),
-            FC(dlatent_size, dlatent_size, gain, use_wscale),
-            FC(dlatent_size, dlatent_size, gain, use_wscale),
-            FC(dlatent_size, dlatent_size, gain, use_wscale),
-            FC(dlatent_size, dlatent_size, gain, use_wscale),
-            FC(dlatent_size, dlatent_size, gain, use_wscale),
-            FC(dlatent_size, dlatent_size, gain, use_wscale),
-            FC(dlatent_size, dlatent_size, gain, use_wscale)
+            FC(self.mapping_fmaps, dlatent_size, gain, lrmul=lrmul, use_wscale=use_wscale),
+            FC(dlatent_size, dlatent_size, gain, lrmul=lrmul, use_wscale=use_wscale),
+            FC(dlatent_size, dlatent_size, gain, lrmul=lrmul, use_wscale=use_wscale),
+            FC(dlatent_size, dlatent_size, gain, lrmul=lrmul, use_wscale=use_wscale),
+            FC(dlatent_size, dlatent_size, gain, lrmul=lrmul, use_wscale=use_wscale),
+            FC(dlatent_size, dlatent_size, gain, lrmul=lrmul, use_wscale=use_wscale),
+            FC(dlatent_size, dlatent_size, gain, lrmul=lrmul, use_wscale=use_wscale),
+            FC(dlatent_size, dlatent_size, gain, lrmul=lrmul, use_wscale=use_wscale)
         )
 
         self.normalize_latents = normalize_latents
@@ -226,8 +359,12 @@ class G_synthesis(nn.Module):
                  structure='fixed',                  # 'fixed' = no progressive growing, 'linear' = human-readable, 'recursive' = efficient, 'auto' = select automatically.
                  fmap_max=512,                       # Maximum number of feature maps in any layer.
                  fmap_decay=1.0,                     # log2 feature map reduction when doubling the resolution.
+                 f=None,                        # (Huge overload, if you dont have enough resouces, please pass it as `f = None`)Low-pass filter to apply when resampling activations. None = no filtering.
                  use_pixel_norm      = False,        # Enable pixelwise feature vector normalization?
-                 use_instance_norm   = True,        # Enable instance normalization?
+                 use_instance_norm   = False,        # Enable instance normalization?
+                 use_wscale = True,                  # Enable equalized learning rate?
+                 use_noise = True,                   # Enable noise inputs?
+                 use_style = True,                   # Enable style inputs?
                  bs=16):                             # batch size.
         """
             2019.3.31
@@ -260,70 +397,68 @@ class G_synthesis(nn.Module):
             shape = [1, 1, 2 ** res, 2 ** res]
             self.noise_inputs.append(torch.randn(*shape).to("cuda"))
 
-        self.apply_noise2  = ApplyNoise(bs, 4)
-        self.apply_noise3  = ApplyNoise(bs, 8)
-        self.apply_noise4  = ApplyNoise(bs, 16)
-        self.apply_noise5  = ApplyNoise(bs, 32)
-        self.apply_noise6  = ApplyNoise(bs, 64)
-        self.apply_noise7  = ApplyNoise(bs, 128)
-        self.apply_noise8  = ApplyNoise(bs, 256)
-        self.apply_noise9  = ApplyNoise(bs, 512)
-        self.apply_noise10 = ApplyNoise(bs, 1024)
+        # Blur2d
+        self.blur = Blur2d(f)
 
         # torgb: fixed mode
-        self.torgb = nn.Conv2d(self.nf(self.resolution_log2), num_channels, kernel_size=1)
+        self.channel_shrinkage = Conv2d(input_channels=self.nf(self.resolution_log2-2),
+                                        output_channels=self.nf(self.resolution_log2),
+                                        kernel_size=3,
+                                        use_wscale=use_wscale)
+        self.torgb = Conv2d(self.nf(self.resolution_log2), num_channels, kernel_size=1, gain=1, use_wscale=use_wscale)
 
+        # Initial Input Block
         self.const_input = nn.Parameter(torch.ones(bs, self.nf(1), 4, 4))
-        self.style21  = nn.Linear(dlatent_size, self.nf(1)*2)
-        self.style22  = nn.Linear(dlatent_size, self.nf(1)*2)
-        self.style3   = nn.Linear(dlatent_size, self.nf(2)*2)
-        self.style4   = nn.Linear(dlatent_size, self.nf(3)*2)
-        self.style5   = nn.Linear(dlatent_size, self.nf(4)*2)
-        self.style6   = nn.Linear(dlatent_size, self.nf(5)*2)
-        self.style7   = nn.Linear(dlatent_size, self.nf(6)*2)
-        self.style8   = nn.Linear(dlatent_size, self.nf(7)*2)
-        self.style9   = nn.Linear(dlatent_size, self.nf(8)*2)
-        self.style10  = nn.Linear(dlatent_size, self.nf(9)*2)
+        self.adaIn1 = LayerEpilogue(self.nf(1), dlatent_size, use_wscale, use_noise, use_pixel_norm,
+                                    use_instance_norm, use_style)
+        self.conv1  = Conv2d(input_channels=self.nf(1), output_channels=self.nf(1), kernel_size=3, use_wscale=use_wscale)
+        self.adaIn2 = LayerEpilogue(self.nf(1), dlatent_size, use_wscale, use_noise, use_pixel_norm,
+                                    use_instance_norm, use_style)
 
-        self.up_conv = nn.Upsample(scale_factor=2, mode='nearest')
-        self.transpose_conv_64_128    = nn.ConvTranspose2d(self.nf(5), self.nf(5), 4, stride=2, padding=1)
-        self.transpose_conv_128_256   = nn.ConvTranspose2d(self.nf(6), self.nf(6), 4, stride=2, padding=1)
-        self.transpose_conv_256_512   = nn.ConvTranspose2d(self.nf(7), self.nf(7), 4, stride=2, padding=1)
-        self.transpose_conv_512_1024  = nn.ConvTranspose2d(self.nf(8), self.nf(8), 4, stride=2, padding=1)
+        # Common Block
+        # 4 x 4 -> 8 x 8
+        res = 3
+        self.GBlock1 = GBlock(res, use_wscale, use_noise, use_pixel_norm, use_instance_norm,
+                              self.noise_inputs)
 
-        # for kernel_size = 3,
-        # torch padding=(1, 1) == tensorflow padding='SAME'.
-        self.conv2 = Conv2d(input_channels=self.nf(1), output_channels=self.nf(1), kernel_size=3)
+        # 8 x 8 -> 16 x 16
+        res = 4
+        self.GBlock2 = GBlock(res, use_wscale, use_noise, use_pixel_norm, use_instance_norm,
+                              self.noise_inputs)
 
-        self.conv31 = Conv2d(input_channels=self.nf(1), output_channels=self.nf(2), kernel_size=3)
-        self.conv32 = Conv2d(input_channels=self.nf(2), output_channels=self.nf(2), kernel_size=3)
+        # 16 x 16 -> 32 x 32
+        res = 5
+        self.GBlock3 = GBlock(res, use_wscale, use_noise, use_pixel_norm, use_instance_norm,
+                              self.noise_inputs)
 
-        self.conv41 = Conv2d(input_channels=self.nf(2), output_channels=self.nf(3), kernel_size=3)
-        self.conv42 = Conv2d(input_channels=self.nf(3), output_channels=self.nf(3), kernel_size=3)
+        # 32 x 32 -> 64 x 64
+        res = 6
+        self.GBlock4 = GBlock(res, use_wscale, use_noise, use_pixel_norm, use_instance_norm,
+                              self.noise_inputs)
 
-        self.conv51 = Conv2d(input_channels=self.nf(3), output_channels=self.nf(4), kernel_size=3)
-        self.conv52 = Conv2d(input_channels=self.nf(4), output_channels=self.nf(4), kernel_size=3)
+        # 64 x 64 -> 128 x 128
+        res = 7
+        self.GBlock5 = GBlock(res, use_wscale, use_noise, use_pixel_norm, use_instance_norm,
+                              self.noise_inputs)
 
-        self.conv61 = Conv2d(input_channels=self.nf(4), output_channels=self.nf(5), kernel_size=3)
-        self.conv62 = Conv2d(input_channels=self.nf(5), output_channels=self.nf(5), kernel_size=3)
+        # 128 x 128 -> 256 x 256
+        res = 8
+        self.GBlock6 = GBlock(res, use_wscale, use_noise, use_pixel_norm, use_instance_norm,
+                              self.noise_inputs)
 
-        self.conv71 = Conv2d(input_channels=self.nf(5), output_channels=self.nf(6), kernel_size=3)
-        self.conv72 = Conv2d(input_channels=self.nf(6), output_channels=self.nf(6), kernel_size=3)
+        # 256 x 256 -> 512 x 512
+        res = 9
+        self.GBlock7 = GBlock(res, use_wscale, use_noise, use_pixel_norm, use_instance_norm,
+                              self.noise_inputs)
 
-        self.conv81 = Conv2d(input_channels=self.nf(6), output_channels=self.nf(7), kernel_size=3)
-        self.conv82 = Conv2d(input_channels=self.nf(7), output_channels=self.nf(7), kernel_size=3)
-
-        self.conv91 = Conv2d(input_channels=self.nf(7), output_channels=self.nf(8), kernel_size=3)
-        self.conv92 = Conv2d(input_channels=self.nf(8), output_channels=self.nf(8), kernel_size=3)
-
-        self.conv101 = Conv2d(input_channels=self.nf(8), output_channels=self.nf(9), kernel_size=3)
-        self.conv102 = Conv2d(input_channels=self.nf(9), output_channels=self.nf(9), kernel_size=3)
-
-        self.conv111 = Conv2d(input_channels=self.nf(9), output_channels=self.nf(10), kernel_size=3)
+        # 512 x 512 -> 1024 x 1024
+        res = 10
+        self.GBlock8 = GBlock(res, use_wscale, use_noise, use_pixel_norm, use_instance_norm,
+                              self.noise_inputs)
 
     def forward(self, dlatent):
         """
-           dlatent是 Disentangled latents (W), shape为[minibatch, num_layers, dlatent_size].
+           dlatent: Disentangled latents (W), shape为[minibatch, num_layers, dlatent_size].
         :param dlatent:
         :return:
         """
@@ -331,249 +466,44 @@ class G_synthesis(nn.Module):
         # Fixed structure: simple and efficient, but does not support progressive growing.
         if self.structure == 'fixed':
             # initial block 0:
-            # A replacement of layer_epilogue in original Tensorflow version.
-            x = self.apply_noise2(self.const_input, self.noise_inputs[0])
-            x = F.leaky_relu(x, 0.2, inplace=True)
-            if self.use_pixel_norm:
-                x = self.pixel_norm(x)
-            if self.use_instance_norm:
-                x = self.instance_norm(x)
-
-            style = self.style21(dlatent[:, 0])
-            style = style.reshape(-1, 2, self.nf(1), 1, 1)
-            x = x * (style[:, 0] + 1) + style[:, 1]
-            x = self.conv2(x)
-            x = self.apply_noise2(x, self.noise_inputs[1])
-            x = F.leaky_relu(x, 0.2, inplace=True)
-            if self.use_pixel_norm:
-                x = self.pixel_norm(x)
-            if self.use_instance_norm:
-                x = self.instance_norm(x)
-
-            style = self.style22(dlatent[:, 1])
-            style = style.reshape(-1, 2, self.nf(1), 1, 1)
-            x = x * (style[:, 0] + 1) + style[:, 1]
+            x = self.const_input
+            x = self.adaIn1(x, self.noise_inputs[0], dlatent[:, 0])
+            x = self.conv1(x)
+            x = self.adaIn2(x, self.noise_inputs[1], dlatent[:, 1])
 
             # block 1:
             # 4 x 4 -> 8 x 8
-            res = 3
-            """
-                notice: 原实现中, 当特征图的高和宽大于等于64的时候, 使用反卷积, 小于等于64的时候, 直接使用最近邻上采样.
-            """
-            x = self.conv31(self.up_conv(x))
-            x = self.apply_noise3(x, self.noise_inputs[res*2-4])
-            x = F.leaky_relu(x, 0.2, inplace=True)
-            if self.use_pixel_norm:
-                x = self.pixel_norm(x)
-            if self.use_instance_norm:
-                x = self.instance_norm(x)
-
-            style = self.style3(dlatent[:, res*2-4])
-            style = style.reshape(-1, 2, self.nf(res-1), 1, 1)
-            x = x * (style[:, 0] + 1) + style[:, 1]
-
-            x = self.conv32(x)
-            x = self.apply_noise3(x, self.noise_inputs[res*2-3])
-            x = F.leaky_relu(x, 0.2, inplace=True)
-            if self.use_pixel_norm:
-                x = self.pixel_norm(x)
-            if self.use_instance_norm:
-                x = self.instance_norm(x)
-
-            style = self.style3(dlatent[:, res*2-3])
-            style = style.reshape(-1, 2, self.nf(res-1), 1, 1)
-            x = x * (style[:, 0] + 1) + style[:, 1]
+            x = self.GBlock1(x, dlatent)
 
             # block 2:
             # 8 x 8 -> 16 x 16
-            res = 4
-            x = self.conv41(self.up_conv(x))
-            x = self.apply_noise4(x, self.noise_inputs[res*2-4])
-            x = F.leaky_relu(x, 0.2, inplace=True)
-            if self.use_pixel_norm:
-                x = self.pixel_norm(x)
-            if self.use_instance_norm:
-                x = self.instance_norm(x)
-
-            style = self.style4(dlatent[:, res*2-4])
-            style = style.reshape(-1, 2, self.nf(res-1), 1, 1)
-            x = x * (style[:, 0] + 1) + style[:, 1]
-
-            x = self.conv42(x)
-            x = self.apply_noise4(x, self.noise_inputs[res*2-3])
-            x = F.leaky_relu(x, 0.2, inplace=True)
-            if self.use_pixel_norm:
-                x = self.pixel_norm(x)
-            if self.use_instance_norm:
-                x = self.instance_norm(x)
-
-            style = self.style4(dlatent[:, res*2-3])
-            style = style.reshape(-1, 2, self.nf(res-1), 1, 1)
-            x = x * (style[:, 0] + 1) + style[:, 1]
+            x = self.GBlock2(x, dlatent)
 
             # block 3:
             # 16 x 16 -> 32 x 32
-            res = 5
-            x = self.conv51(self.up_conv(x))
-            x = self.apply_noise5(x, self.noise_inputs[res*2-4])
-            x = F.leaky_relu(x, 0.2, inplace=True)
-            if self.use_pixel_norm:
-                x = self.pixel_norm(x)
-            if self.use_instance_norm:
-                x = self.instance_norm(x)
-
-            style = self.style5(dlatent[:, res*2-4])
-            style = style.reshape(-1, 2, self.nf(res-1), 1, 1)
-            x = x * (style[:, 0] + 1) + style[:, 1]
-
-            x = self.conv52(x)
-            x = self.apply_noise5(x, self.noise_inputs[res*2-3])
-            x = F.leaky_relu(x, 0.2, inplace=True)
-            if self.use_pixel_norm:
-                x = self.pixel_norm(x)
-            if self.use_instance_norm:
-                x = self.instance_norm(x)
-
-            style = self.style5(dlatent[:, res*2-3])
-            style = style.reshape(-1, 2, self.nf(res-1), 1, 1)
-            x = x * (style[:, 0] + 1) + style[:, 1]
+            x = self.GBlock3(x, dlatent)
 
             # block 4:
             # 32 x 32 -> 64 x 64
-            res = 6
-            x = self.conv61(self.up_conv(x))
-            x = self.apply_noise6(x, self.noise_inputs[res*2-4])
-            x = F.leaky_relu(x, 0.2, inplace=True)
-            if self.use_pixel_norm:
-                x = self.pixel_norm(x)
-            if self.use_instance_norm:
-                x = self.instance_norm(x)
-
-            style = self.style6(dlatent[:, res*2-4])
-            style = style.reshape(-1, 2, self.nf(res-1), 1, 1)
-            x = x * (style[:, 0] + 1) + style[:, 1]
-
-            x = self.conv62(x)
-            x = self.apply_noise6(x, self.noise_inputs[res*2-3])
-            x = F.leaky_relu(x, 0.2, inplace=True)
-            if self.use_pixel_norm:
-                x = self.pixel_norm(x)
-            if self.use_instance_norm:
-                x = self.instance_norm(x)
-
-            style = self.style6(dlatent[:, res*2-3])
-            style = style.reshape(-1, 2, self.nf(res-1), 1, 1)
-            x = x * (style[:, 0] + 1) + style[:, 1]
+            x = self.GBlock4(x, dlatent)
 
             # block 5:
             # 64 x 64 -> 128 x 128
-            res = 7
-            x = self.conv71(self.transpose_conv_64_128(x))
-            x = self.apply_noise7(x, self.noise_inputs[res*2-4])
-            x = F.leaky_relu(x, 0.2, inplace=True)
-            if self.use_pixel_norm:
-                x = self.pixel_norm(x)
-            if self.use_instance_norm:
-                x = self.instance_norm(x)
-
-            style = self.style7(dlatent[:, res*2-4])
-            style = style.reshape(-1, 2, self.nf(res-1), 1, 1)
-            x = x * (style[:, 0] + 1) + style[:, 1]
-
-            x = self.conv72(x)
-            x = self.apply_noise7(x, self.noise_inputs[res*2-3])
-            x = F.leaky_relu(x, 0.2, inplace=True)
-            if self.use_pixel_norm:
-                x = self.pixel_norm(x)
-            if self.use_instance_norm:
-                x = self.instance_norm(x)
-
-            style = self.style7(dlatent[:, res*2-3])
-            style = style.reshape(-1, 2, self.nf(res-1), 1, 1)
-            x = x * (style[:, 0] + 1) + style[:, 1]
+            x = self.GBlock5(x, dlatent)
 
             # block 6:
             # 128 x 128 -> 256 x 256
-            res = 8
-            x = self.conv81(self.transpose_conv_128_256(x))
-            x = self.apply_noise8(x, self.noise_inputs[res*2-4])
-            x = F.leaky_relu(x, 0.2, inplace=True)
-            if self.use_pixel_norm:
-                x = self.pixel_norm(x)
-            if self.use_instance_norm:
-                x = self.instance_norm(x)
-
-            style = self.style8(dlatent[:, res*2-4])
-            style = style.reshape(-1, 2, self.nf(res-1), 1, 1)
-            x = x * (style[:, 0] + 1) + style[:, 1]
-
-            x = self.conv82(x)
-            x = self.apply_noise8(x, self.noise_inputs[res*2-3])
-            x = F.leaky_relu(x, 0.2, inplace=True)
-            if self.use_pixel_norm:
-                x = self.pixel_norm(x)
-            if self.use_instance_norm:
-                x = self.instance_norm(x)
-
-            style = self.style8(dlatent[:, res*2-3])
-            style = style.reshape(-1, 2, self.nf(res-1), 1, 1)
-            x = x * (style[:, 0] + 1) + style[:, 1]
+            x = self.GBlock6(x, dlatent)
 
             # block 7:
             # 256 x 256 -> 512 x 512
-            res = 9
-            x = self.conv91(self.transpose_conv_256_512(x))
-            x = self.apply_noise9(x, self.noise_inputs[res*2-4])
-            x = F.leaky_relu(x, 0.2, inplace=True)
-            if self.use_pixel_norm:
-                x = self.pixel_norm(x)
-            if self.use_instance_norm:
-                x = self.instance_norm(x)
-
-            style = self.style9(dlatent[:, res*2-4])
-            style = style.reshape(-1, 2, self.nf(res-1), 1, 1)
-            x = x * (style[:, 0] + 1) + style[:, 1]
-
-            x = self.conv92(x)
-            x = self.apply_noise9(x, self.noise_inputs[res*2-3])
-            x = F.leaky_relu(x, 0.2, inplace=True)
-            if self.use_pixel_norm:
-                x = self.pixel_norm(x)
-            if self.use_instance_norm:
-                x = self.instance_norm(x)
-
-            style = self.style9(dlatent[:, res*2-3])
-            style = style.reshape(-1, 2, self.nf(res-1), 1, 1)
-            x = x * (style[:, 0] + 1) + style[:, 1]
+            x = self.GBlock7(x, dlatent)
 
             # block 8:
             # 512 x 512 -> 1024 x 1024
-            res = 10
-            x = self.conv101(self.transpose_conv_512_1024(x))
-            x = self.apply_noise10(x, self.noise_inputs[res*2-4])
-            x = F.leaky_relu(x, 0.2, inplace=True)
-            if self.use_pixel_norm:
-                x = self.pixel_norm(x)
-            if self.use_instance_norm:
-                x = self.instance_norm(x)
+            x = self.GBlock8(x, dlatent)
 
-            style = self.style10(dlatent[:, res*2-4])
-            style = style.reshape(-1, 2, self.nf(res-1), 1, 1)
-            x = x * (style[:, 0] + 1) + style[:, 1]
-
-            x = self.conv102(x)
-            x = self.apply_noise10(x, self.noise_inputs[res*2-3])
-            x = F.leaky_relu(x, 0.2, inplace=True)
-            if self.use_pixel_norm:
-                x = self.pixel_norm(x)
-            if self.use_instance_norm:
-                x = self.instance_norm(x)
-
-            style = self.style10(dlatent[:, res*2-3])
-            style = style.reshape(-1, 2, self.nf(res-1), 1, 1)
-            x = x * (style[:, 0] + 1) + style[:, 1]
-
-            x = self.conv111(x)
+            x = self.channel_shrinkage(x)
             images_out = self.torgb(x)
             return images_out
 
@@ -584,7 +514,8 @@ class StyleGenerator(nn.Module):
                  bs=16,
                  style_mixing_prob=0.9,       # Probability of mixing styles during training. None = disable.
                  truncation_psi=0.7,          # Style strength multiplier for the truncation trick. None = disable.
-                 truncation_cutoff=8          # Number of layers for which to apply the truncation trick. None = disable.
+                 truncation_cutoff=8,          # Number of layers for which to apply the truncation trick. None = disable.
+                 **kwargs
                  ):
         super(StyleGenerator, self).__init__()
         self.mapping_fmaps = mapping_fmaps
@@ -592,8 +523,8 @@ class StyleGenerator(nn.Module):
         self.truncation_psi = truncation_psi
         self.truncation_cutoff = truncation_cutoff
 
-        self.mapping = G_mapping(self.mapping_fmaps)
-        self.synthesis = G_synthesis(self.mapping_fmaps, bs=bs)
+        self.mapping = G_mapping(self.mapping_fmaps, **kwargs)
+        self.synthesis = G_synthesis(self.mapping_fmaps, bs=bs, **kwargs)
 
     def forward(self, latents1):
         dlatents1, num_layers = self.mapping(latents1)
@@ -646,7 +577,8 @@ class StyleDiscriminator(nn.Module):
                  structure='fixed',  # 'fixed' = no progressive growing, 'linear' = human-readable, 'recursive' = efficient, only support 'fixed' mode now.
                  fmap_max=512,
                  fmap_decay=1.0,
-                 f=[1, 2, 1]         # (Huge overload, if you dont have enough resouces, please pass it as `f = None`)Low-pass filter to apply when resampling activations. None = no filtering.
+                 # f=[1, 2, 1]         # (Huge overload, if you dont have enough resouces, please pass it as `f = None`)Low-pass filter to apply when resampling activations. None = no filtering.
+                 f=None         # (Huge overload, if you dont have enough resouces, please pass it as `f = None`)Low-pass filter to apply when resampling activations. None = no filtering.
                  ):
         """
             Noitce: we only support input pic with height == width.
