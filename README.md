@@ -46,9 +46,9 @@ python3 train_stylegan.py
 *  Two kind of `downsample` method in `StyleDiscriminator`.
 * `PixelNorm` and `InstanceNorm`. 
 * `Noise` mechanism.
+* `styleMixed` mechanism.
 
 #### Unfinished
-* `styleMixed` mechanism.
 * Inference code.
 
 ## Related
