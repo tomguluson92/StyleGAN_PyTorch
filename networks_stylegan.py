@@ -385,10 +385,6 @@ class G_synthesis(nn.Module):
         # as this example, we get num_layers = 18.
         num_layers = self.resolution_log2 * 2 - 2
         self.num_layers = num_layers
-        self.use_pixel_norm = use_pixel_norm
-        self.use_instance_norm = use_instance_norm
-        self.pixel_norm = PixelNorm()
-        self.instance_norm = InstanceNorm()
 
         # Noise inputs.
         self.noise_inputs = []
