@@ -11,7 +11,7 @@ from networks_stylegan import StyleGenerator, StyleDiscriminator
 from networks_gan import Generator, Discriminator
 from utils.utils import plotLossCurve
 from loss.loss import gradient_penalty, R1Penalty, R2Penalty
-from opts.opts import TrainOptions
+from opts.opts import TrainOptions, INFO
 
 from torchvision.utils import save_image
 from tqdm import tqdm
@@ -53,6 +53,15 @@ def main(opts):
     # Create the model
     G = StyleGenerator(bs=opts.batch_size).to(opts.device)
     D = StyleDiscriminator().to(opts.device)
+
+    # Load the pre-trained weight
+    if os.path.exists(opts.resume):
+        INFO("Load the pre-trained weight!")
+        state = torch.load(opts.resume)
+        G.load_state_dict(state['G'])
+        D.load_state_dict(state['D'])
+    else:
+        INFO("Pre-trained weight cannot load successfully, train from scratch!")
 
     # Create the criterion, optimizer and scheduler
     optim_D = optim.Adam(D.parameters(), lr=0.0002, betas=(0.5, 0.999))

@@ -30,7 +30,7 @@ class TrainOptions():
         parser.add_argument('--epoch', type=int, default=500)
         parser.add_argument('--batch_size', type=int, default=2)
         parser.add_argument('--type', type=str, default='style')
-        parser.add_argument('--resume', type=str, default='model.pth')
+        parser.add_argument('--resume', type=str, default='train_result/models/latest.pth')
         parser.add_argument('--det', type=str, default='train_result')
         parser.add_argument('--r1_gamma', type=float, default=10.0)
         parser.add_argument('--r2_gamma', type=float, default=0.0)
@@ -60,7 +60,7 @@ class TrainOptions():
 class InferenceOptions():
     def __init__(self):
         parser = argparse.ArgumentParser()
-        parser.add_argument('--resume', type=str, default='train_result_v0.1/model/latest.pth')
+        parser.add_argument('--resume', type=str, default='train_result/model/latest.pth')
         parser.add_argument('--type', type=str, default='style')
         parser.add_argument('--num_face', type=int, default=32)
         parser.add_argument('--det', type=str, default='result.png')
