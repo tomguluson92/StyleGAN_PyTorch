@@ -361,7 +361,7 @@ class G_synthesis(nn.Module):
                  fmap_decay=1.0,                     # log2 feature map reduction when doubling the resolution.
                  f=None,                        # (Huge overload, if you dont have enough resouces, please pass it as `f = None`)Low-pass filter to apply when resampling activations. None = no filtering.
                  use_pixel_norm      = False,        # Enable pixelwise feature vector normalization?
-                 use_instance_norm   = False,        # Enable instance normalization?
+                 use_instance_norm   = True,        # Enable instance normalization?
                  use_wscale = True,                  # Enable equalized learning rate?
                  use_noise = True,                   # Enable noise inputs?
                  use_style = True,                   # Enable style inputs?
