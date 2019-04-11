@@ -51,7 +51,8 @@ def main(opts):
     )
 
     # Create the model
-    G = StyleGenerator(bs=opts.batch_size).to(opts.device)
+    start_epoch = 0
+    G = StyleGenerator().to(opts.device)
     D = StyleDiscriminator().to(opts.device)
 
     # Load the pre-trained weight
@@ -60,12 +61,13 @@ def main(opts):
         state = torch.load(opts.resume)
         G.load_state_dict(state['G'])
         D.load_state_dict(state['D'])
+        start_epoch = state['start_epoch']
     else:
         INFO("Pre-trained weight cannot load successfully, train from scratch!")
 
     # Create the criterion, optimizer and scheduler
-    optim_D = optim.Adam(D.parameters(), lr=0.0002, betas=(0.5, 0.999))
-    optim_G = optim.Adam(G.parameters(), lr=0.0002, betas=(0.5, 0.999))
+    optim_D = optim.Adam(D.parameters(), lr=0.00005, betas=(0.5, 0.999))
+    optim_G = optim.Adam(G.parameters(), lr=0.00005, betas=(0.5, 0.999))
     scheduler_D = optim.lr_scheduler.ExponentialLR(optim_D, gamma=0.99)
     scheduler_G = optim.lr_scheduler.ExponentialLR(optim_G, gamma=0.99)
 
@@ -74,7 +76,7 @@ def main(opts):
     softplus = nn.Softplus()
     Loss_D_list = [0.0]
     Loss_G_list = [0.0]
-    for ep in range(opts.epoch):
+    for ep in range(start_epoch, opts.epoch):
         bar = tqdm(loader)
         loss_D_list = []
         loss_G_list = []
@@ -87,8 +89,8 @@ def main(opts):
             real_logit = D(real_img)
             fake_img = G(torch.randn([real_img.size(0), 512]).to(opts.device))
             fake_logit = D(fake_img.detach())
-            d_loss = softplus(fake_logit)[0]
-            d_loss = d_loss + softplus(-real_logit)[0]
+            d_loss = softplus(fake_logit).mean()
+            d_loss = d_loss + softplus(-real_logit).mean()
 
             if opts.r1_gamma != 0.0:
                 r1_penalty = R1Penalty(real_img.detach(), D)
@@ -108,8 +110,6 @@ def main(opts):
             # =======================================================================================================
             #   (2) Update G network: maximize log(D(G(z)))
             # =======================================================================================================
-            # if i % CRITIC_ITER == 0:
-            # Compute adversarial loss toward generator
             G.zero_grad()
             fake_logit = D(fake_img)
             g_loss = softplus(-fake_logit).mean()
@@ -137,6 +137,7 @@ def main(opts):
             'D': D.state_dict(),
             'Loss_G': Loss_G_list,
             'Loss_D': Loss_D_list,
+            'start_epoch': ep,
         }
         torch.save(state, os.path.join(opts.det, 'models', 'latest.pth'))
 

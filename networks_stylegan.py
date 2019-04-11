@@ -1,7 +1,7 @@
 # coding: UTF-8
 """
     @author: samuel ko
-    @date:   2019.04.09
+    @date:   2019.04.11
     @notice:
              1) refactor the module of Gsynthesis with
                 - LayerEpilogue.
@@ -10,6 +10,7 @@
                 and etc.
              2) the initialization of every patch we use are all abided by the original NvLabs released code.
              3) Discriminator is a simplicity version of PyTorch.
+             4) fix bug: default settings of batchsize.
 
 """
 import torch.nn.functional as F
@@ -364,8 +365,8 @@ class G_synthesis(nn.Module):
                  use_instance_norm   = True,        # Enable instance normalization?
                  use_wscale = True,                  # Enable equalized learning rate?
                  use_noise = True,                   # Enable noise inputs?
-                 use_style = True,                   # Enable style inputs?
-                 bs=16):                             # batch size.
+                 use_style = True                    # Enable style inputs?
+                 ):                             # batch size.
         """
             2019.3.31
         :param dlatent_size: 512 Disentangled latent(W) dimensionality.
@@ -374,7 +375,6 @@ class G_synthesis(nn.Module):
         :param num_channels:
         :param structure: only support 'fixed' mode.
         :param fmap_max:
-        :param bs: batch size.
         """
         super(G_synthesis, self).__init__()
 
@@ -404,9 +404,10 @@ class G_synthesis(nn.Module):
         self.torgb = Conv2d(self.nf(self.resolution_log2), num_channels, kernel_size=1, gain=1, use_wscale=use_wscale)
 
         # Initial Input Block
-        self.const_input = nn.Parameter(torch.ones(bs, self.nf(1), 4, 4))
-        self.adaIn1 = LayerEpilogue(self.nf(1), dlatent_size, use_wscale, use_noise, use_pixel_norm,
-                                    use_instance_norm, use_style)
+        self.const_input = nn.Parameter(torch.ones(1, self.nf(1), 4, 4))
+        self.bias = nn.Parameter(torch.ones(self.nf(1)))
+        self.adaIn1 = LayerEpilogue(self.nf(1), dlatent_size, use_wscale, use_noise,
+                                    use_pixel_norm, use_instance_norm, use_style)
         self.conv1  = Conv2d(input_channels=self.nf(1), output_channels=self.nf(1), kernel_size=3, use_wscale=use_wscale)
         self.adaIn2 = LayerEpilogue(self.nf(1), dlatent_size, use_wscale, use_noise, use_pixel_norm,
                                     use_instance_norm, use_style)
@@ -462,7 +463,8 @@ class G_synthesis(nn.Module):
         # Fixed structure: simple and efficient, but does not support progressive growing.
         if self.structure == 'fixed':
             # initial block 0:
-            x = self.const_input
+            x = self.const_input.expand(dlatent.size(0), -1, -1, -1)
+            x = x + self.bias.view(1, -1, 1, 1)
             x = self.adaIn1(x, self.noise_inputs[0], dlatent[:, 0])
             x = self.conv1(x)
             x = self.adaIn2(x, self.noise_inputs[1], dlatent[:, 1])
@@ -507,7 +509,6 @@ class G_synthesis(nn.Module):
 class StyleGenerator(nn.Module):
     def __init__(self,
                  mapping_fmaps=512,
-                 bs=16,
                  style_mixing_prob=0.9,       # Probability of mixing styles during training. None = disable.
                  truncation_psi=0.7,          # Style strength multiplier for the truncation trick. None = disable.
                  truncation_cutoff=8,          # Number of layers for which to apply the truncation trick. None = disable.
@@ -520,7 +521,7 @@ class StyleGenerator(nn.Module):
         self.truncation_cutoff = truncation_cutoff
 
         self.mapping = G_mapping(self.mapping_fmaps, **kwargs)
-        self.synthesis = G_synthesis(self.mapping_fmaps, bs=bs, **kwargs)
+        self.synthesis = G_synthesis(self.mapping_fmaps, **kwargs)
 
     def forward(self, latents1):
         dlatents1, num_layers = self.mapping(latents1)
@@ -614,6 +615,7 @@ class StyleDiscriminator(nn.Module):
         self.conv_last = nn.Conv2d(self.nf(self.resolution_log2-8), self.nf(1), kernel_size=3, padding=(1, 1))
         self.dense0 = nn.Linear(fmap_base, self.nf(0))
         self.dense1 = nn.Linear(self.nf(0), 1)
+        self.sigmoid = nn.Sigmoid()
 
     def forward(self, input):
         if self.structure == 'fixed':
