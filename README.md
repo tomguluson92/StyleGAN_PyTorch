@@ -63,6 +63,7 @@ python3 train_stylegan.py
 - PyTorch 1.0.1
 - Numpy 1.13.3
 - torchvision 0.2.1
+- scikit-image 0.15.0
 - GTX 1080Ti or above
 
 ## Q&A
