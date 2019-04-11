@@ -66,8 +66,8 @@ def main(opts):
         INFO("Pre-trained weight cannot load successfully, train from scratch!")
 
     # Create the criterion, optimizer and scheduler
-    optim_D = optim.Adam(D.parameters(), lr=0.00005, betas=(0.5, 0.999))
-    optim_G = optim.Adam(G.parameters(), lr=0.00005, betas=(0.5, 0.999))
+    optim_D = optim.Adam(D.parameters(), lr=0.0001, betas=(0.5, 0.999))
+    optim_G = optim.Adam(G.parameters(), lr=0.0001, betas=(0.5, 0.999))
     scheduler_D = optim.lr_scheduler.ExponentialLR(optim_D, gamma=0.99)
     scheduler_G = optim.lr_scheduler.ExponentialLR(optim_G, gamma=0.99)
 
@@ -85,6 +85,7 @@ def main(opts):
             #   (1) Update D network: maximize log(D(x)) + log(1 - D(G(z)))
             # =======================================================================================================
             # Compute adversarial loss toward discriminator
+            D.zero_grad()
             real_img = real_img.to(opts.device)
             real_logit = D(real_img)
             fake_img = G(torch.randn([real_img.size(0), 512]).to(opts.device))
@@ -103,7 +104,6 @@ def main(opts):
             loss_D_list.append(d_loss.item())
 
             # Update discriminator
-            optim_D.zero_grad()
             d_loss.backward()
             optim_D.step()
 
