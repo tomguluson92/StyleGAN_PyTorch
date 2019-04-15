@@ -30,7 +30,7 @@ class ApplyNoise(nn.Module):
     def forward(self, x, noise):
         if noise is None:
             noise = torch.randn(x.size(0), 1, x.size(2), x.size(3), device=x.device, dtype=x.dtype)
-        return x + self.weight.view(1, -1, 1, 1) * noise
+        return x + self.weight.view(1, -1, 1, 1) * noise.to(x.device)
 
 
 class ApplyStyle(nn.Module):

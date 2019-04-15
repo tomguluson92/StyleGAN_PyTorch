@@ -47,6 +47,7 @@ python3 train_stylegan.py
 * `PixelNorm` and `InstanceNorm`. 
 * `Noise` mechanism.
 * `styleMixed` mechanism.
+* add `Multi-GPU` support.
 
 #### Unfinished
 * Inference code.
@@ -69,7 +70,7 @@ python3 train_stylegan.py
 ## Q&A
 
 ## Acknowledgements
-Our code can run `1024 x 1024` resolution image generation task in single 1080Ti, if you have stronger graphic card or GPU, then
+Our code can run `1024 x 1024` resolution image generation task on 1080Ti, if you have stronger graphic card or GPU, then
 you may train your model with large batchsize and self-define your multi-gpu version of this code.
 
 My Email is **samuel.gao023@gmail.com**, if you have any question and wanna to PR, please let me know, thank you. 

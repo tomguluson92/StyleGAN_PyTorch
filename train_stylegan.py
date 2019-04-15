@@ -50,10 +50,16 @@ def main(opts):
         shuffle=True,
     )
 
-    # Create the model
+    # Create the model (Multi-GPU support)
     start_epoch = 0
-    G = StyleGenerator().to(opts.device)
-    D = StyleDiscriminator().to(opts.device)
+    G = StyleGenerator()
+    D = StyleDiscriminator()
+    if torch.cuda.device_count() > 1:
+        INFO("Multiple GPU:" + str(torch.cuda.device_count()) + "GPUs")
+        G = nn.DataParallel(G)
+        D = nn.DataParallel(D)
+    G.to(opts.device)
+    D.to(opts.device)
 
     # Load the pre-trained weight
     if os.path.exists(opts.resume):
