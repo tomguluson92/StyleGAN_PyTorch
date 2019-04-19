@@ -50,16 +50,10 @@ def main(opts):
         shuffle=True,
     )
 
-    # Create the model (Multi-GPU support)
+    # Create the model
     start_epoch = 0
     G = StyleGenerator()
     D = StyleDiscriminator()
-    if torch.cuda.device_count() > 1:
-        INFO("Multiple GPU:" + str(torch.cuda.device_count()) + "GPUs")
-        G = nn.DataParallel(G)
-        D = nn.DataParallel(D)
-    G.to(opts.device)
-    D.to(opts.device)
 
     # Load the pre-trained weight
     if os.path.exists(opts.resume):
@@ -70,6 +64,14 @@ def main(opts):
         start_epoch = state['start_epoch']
     else:
         INFO("Pre-trained weight cannot load successfully, train from scratch!")
+
+    # Multi-GPU support
+    if torch.cuda.device_count() > 1:
+        INFO("Multiple GPU:" + str(torch.cuda.device_count()) + "\t GPUs")
+        G = nn.DataParallel(G)
+        D = nn.DataParallel(D)
+    G.to(opts.device)
+    D.to(opts.device)
 
     # Create the criterion, optimizer and scheduler
     optim_D = optim.Adam(D.parameters(), lr=0.0001, betas=(0.5, 0.999))
