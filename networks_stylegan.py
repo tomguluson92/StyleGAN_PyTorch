@@ -104,7 +104,8 @@ class Blur2d(nn.Module):
             if normalize:
                 f = f / f.sum()
             if flip:
-                f = f[:, :, ::-1, ::-1]
+                # f = f[:, :, ::-1, ::-1]
+                f = torch.flip(f, [2, 3])
             self.f = f
         else:
             self.f = None
