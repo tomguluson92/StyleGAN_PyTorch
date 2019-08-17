@@ -74,8 +74,8 @@ def main(opts):
     D.to(opts.device)
 
     # Create the criterion, optimizer and scheduler
-    optim_D = optim.Adam(D.parameters(), lr=0.0001, betas=(0.5, 0.999))
-    optim_G = optim.Adam(G.parameters(), lr=0.0001, betas=(0.5, 0.999))
+    optim_D = optim.Adam(D.parameters(), lr=0.00001, betas=(0.5, 0.999))
+    optim_G = optim.Adam(G.parameters(), lr=0.00001, betas=(0.5, 0.999))
     scheduler_D = optim.lr_scheduler.ExponentialLR(optim_D, gamma=0.99)
     scheduler_G = optim.lr_scheduler.ExponentialLR(optim_G, gamma=0.99)
 
@@ -118,14 +118,15 @@ def main(opts):
             # =======================================================================================================
             #   (2) Update G network: maximize log(D(G(z)))
             # =======================================================================================================
-            G.zero_grad()
-            fake_logit = D(fake_img)
-            g_loss = softplus(-fake_logit).mean()
-            loss_G_list.append(g_loss.item())
+            if i % CRITIC_ITER == 0:
+                G.zero_grad()
+                fake_logit = D(fake_img)
+                g_loss = softplus(-fake_logit).mean()
+                loss_G_list.append(g_loss.item())
 
-            # Update generator
-            g_loss.backward()
-            optim_G.step()
+                # Update generator
+                g_loss.backward()
+                optim_G.step()
 
             # Output training stats
             bar.set_description("Epoch {} [{}, {}] [G]: {} [D]: {}".format(ep, i+1, len(loader), loss_G_list[-1], loss_D_list[-1]))
