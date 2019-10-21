@@ -20,6 +20,11 @@ Picture: These people are not real – they were produced by our generator that 
 To the best of my knowledge, there is still not a similar pytorch 1.0 implementation of styleGAN as NvLabs released(Tensorflow),
 therefore, i wanna implement it on pytorch1.0.1 to extend its usage in pytorch community.
 
+## Notice
+@date: 2019.10.21
+@info: The noteworthy thing I just ignore to highlight is you need change default `Star` dataset to your own dataset (such as FFHQ or others) in `opts.py`. Sorry for my carelessness for this.
+
+
 ## Author
 
 - [Samuel Ko](https://blog.csdn.net/g11d111)
