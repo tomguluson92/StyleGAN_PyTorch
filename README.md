@@ -1,3 +1,7 @@
+<a href='https://tracking.gitads.io/?repo=StyleGAN_PyTorch'><img src="https://images.gitads.io/StyleGAN_PyTorch" alt=“GitAds”/></a>
+
+<br><i>This advert was placed by <a href='https://tracking.gitads.io/?campaign=gitads&repo=estabbarcontroller&redirect=gitads.io'>GitAds</a> </i>
+
 # A PyTorch Implementation of StyleGAN (Unofficial)
 
 ![Github](https://img.shields.io/badge/PyTorch-v1.0.1-green.svg?style=for-the-badge&logo=data:image/png)
